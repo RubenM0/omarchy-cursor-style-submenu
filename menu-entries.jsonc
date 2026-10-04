@@ -1,4 +1,5 @@
   "style.cursor": {"icon":"", "label":"Cursor", "title":"Mouse Cursor"},
+  "style.cursor.default": {"icon":"", "label":"Omarchy default", "checked":"[[ \"$(omarchy-cursor-current)\" == default && \"$(omarchy-cursor-size)\" == 24 ]]", "action":"omarchy-cursor-set --default"},
   "style.cursor.size": {"icon":"", "label":"Size", "title":"Cursor Size"},
   "style.cursor.size.8": {"icon":"", "label":"8", "checked":"[[ \"$(omarchy-cursor-size)\" == 8 ]]", "action":"omarchy-cursor-set --size 8"},
   "style.cursor.size.16": {"icon":"", "label":"16", "checked":"[[ \"$(omarchy-cursor-size)\" == 16 ]]", "action":"omarchy-cursor-set --size 16"},

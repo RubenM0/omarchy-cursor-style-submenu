@@ -25,6 +25,45 @@ cursor_size() {
   printf '%s\n' "${size:-32}"
 }
 
+# Hyprland needs a theme directory that contains cursors/. Omarchy's "default"
+# theme only inherits Adwaita, so follow one Inherits= hop when needed.
+hypr_theme() {
+  local theme=$1 dir inherits
+  for dir in "$HOME/.local/share/icons" "$HOME/.icons" /usr/share/icons; do
+    if [[ -d $dir/$theme/cursors ]]; then
+      printf '%s\n' "$theme"
+      return
+    fi
+  done
+  for dir in "$HOME/.local/share/icons" "$HOME/.icons" /usr/share/icons; do
+    if [[ -f $dir/$theme/index.theme ]]; then
+      inherits=$(sed -n 's/^Inherits=//p' "$dir/$theme/index.theme" | head -1)
+      inherits=${inherits%%,*}
+      inherits=${inherits// /}
+      if [[ -n $inherits ]]; then
+        printf '%s\n' "$inherits"
+        return
+      fi
+    fi
+  done
+  printf '%s\n' "$theme"
+}
+
+clear_cursor_overrides() {
+  python3 - "$HYPR_CONFIG" << 'PY'
+import os, re, sys
+path = sys.argv[1]
+if not os.path.exists(path):
+    raise SystemExit(0)
+text = open(path).read()
+keys = ("XCURSOR_THEME", "HYPRCURSOR_THEME", "XCURSOR_SIZE", "HYPRCURSOR_SIZE")
+for key in keys:
+    text = re.sub(rf'^hl\.env\("{key}", ".*"\)\n', "", text, flags=re.M)
+text = re.sub(r"\n{3,}", "\n\n", text)
+open(path, "w").write(text)
+PY
+}
+
 persist_hypr() {
   local theme=$1 size=$2 what=$3
   python3 - "$HYPR_CONFIG" "$theme" "$size" "$what" << 'PY'
@@ -63,6 +102,14 @@ if [[ $cmd == omarchy-cursor-size && $# -eq 0 ]]; then
   exit 0
 fi
 
+if [[ ${1-} == --default ]]; then
+  hyprctl setcursor "$(hypr_theme default)" 24
+  gsettings set org.gnome.desktop.interface cursor-theme default
+  gsettings set org.gnome.desktop.interface cursor-size 24
+  clear_cursor_overrides
+  exit 0
+fi
+
 if [[ ${1-} == --size ]]; then
   size=${2-}
   if [[ ! $size =~ ^[1-9][0-9]*$ ]]; then
@@ -71,7 +118,7 @@ if [[ ${1-} == --size ]]; then
   fi
   theme=$(cursor_current)
   if [[ -n $theme ]]; then
-    hyprctl setcursor "$theme" "$size"
+    hyprctl setcursor "$(hypr_theme "$theme")" "$size"
   fi
   gsettings set org.gnome.desktop.interface cursor-size "$size"
   persist_hypr "$theme" "$size" size
@@ -82,6 +129,7 @@ theme=${1-}
 if [[ -z $theme || $theme == -* || $theme == */* || $theme == *..* ]]; then
   echo "Usage: omarchy-cursor-set <theme-directory-name>" >&2
   echo "       omarchy-cursor-set --size <pixels>" >&2
+  echo "       omarchy-cursor-set --default" >&2
   echo "       omarchy-cursor-current" >&2
   exit 2
 fi
@@ -99,7 +147,7 @@ if [[ -z $found ]]; then
 fi
 
 size=$(cursor_size)
-hyprctl setcursor "$theme" "$size"
+hyprctl setcursor "$(hypr_theme "$theme")" "$size"
 gsettings set org.gnome.desktop.interface cursor-theme "$theme"
 gsettings set org.gnome.desktop.interface cursor-size "$size"
 persist_hypr "$theme" "$size" theme

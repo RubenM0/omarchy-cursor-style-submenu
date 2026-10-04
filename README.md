@@ -1,6 +1,6 @@
 # omarchy-cursor-style-submenu
 
-Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a theme switches the pointer immediately and keeps that choice across login. Size is left alone.
+Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a theme switches the pointer immediately and keeps that choice across login. **Size** is the first item and offers 8, 16, 32, 64, and 128.
 
 Cursor artwork is not in this repo. Install the themes yourself; a row is hidden until its folder is present.
 
@@ -28,5 +28,7 @@ Menu layout: Teto, Korkhon, then Retrosmart Win-ish, Mac-ish, Cur-font, and Win 
 
 ```bash
 omarchy-cursor-set tetoW
+omarchy-cursor-set --size 32
 omarchy-cursor-current
+omarchy-cursor-size
 ```

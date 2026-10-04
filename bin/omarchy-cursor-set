@@ -1,6 +1,7 @@
 #!/bin/bash
-# Apply an Xcursor theme and keep it across login.
+# Apply an Xcursor theme or size and keep it across login.
 # omarchy-cursor-current prints the active theme name.
+# omarchy-cursor-size prints the active size.
 
 set -euo pipefail
 
@@ -24,14 +25,63 @@ cursor_size() {
   printf '%s\n' "${size:-32}"
 }
 
-if [[ ${1-} == --current || $(basename "$0") == omarchy-cursor-current ]]; then
+persist_hypr() {
+  local theme=$1 size=$2 what=$3
+  python3 - "$HYPR_CONFIG" "$theme" "$size" "$what" << 'PY'
+import os, re, sys
+path, theme, size, what = sys.argv[1:]
+lua = theme.replace("\\", "\\\\").replace('"', '\\"')
+text = open(path).read() if os.path.exists(path) else ""
+if text and not text.endswith("\n"):
+    text += "\n"
+replacements = {}
+if what in ("theme", "both"):
+    replacements["XCURSOR_THEME"] = f'hl.env("XCURSOR_THEME", "{lua}")\n'
+    replacements["HYPRCURSOR_THEME"] = f'hl.env("HYPRCURSOR_THEME", "{lua}")\n'
+if what in ("size", "both"):
+    replacements["XCURSOR_SIZE"] = f'hl.env("XCURSOR_SIZE", "{size}")\n'
+    replacements["HYPRCURSOR_SIZE"] = f'hl.env("HYPRCURSOR_SIZE", "{size}")\n'
+for key, repl in replacements.items():
+    pat = re.compile(rf'^hl\.env\("{key}", ".*"\)\n', re.M)
+    if pat.search(text):
+        text = pat.sub(repl, text, count=1)
+    else:
+        text += repl
+os.makedirs(os.path.dirname(path), exist_ok=True)
+open(path, "w").write(text)
+PY
+}
+
+cmd=$(basename "$0")
+if [[ ${1-} == --current || $cmd == omarchy-cursor-current ]]; then
   cursor_current
+  exit 0
+fi
+
+if [[ $cmd == omarchy-cursor-size && $# -eq 0 ]]; then
+  cursor_size
+  exit 0
+fi
+
+if [[ ${1-} == --size ]]; then
+  size=${2-}
+  if [[ ! $size =~ ^[1-9][0-9]*$ ]]; then
+    echo "Usage: omarchy-cursor-set --size <pixels>" >&2
+    exit 2
+  fi
+  theme=$(cursor_current)
+  if [[ -n $theme ]]; then
+    hyprctl setcursor "$theme" "$size"
+  fi
+  gsettings set org.gnome.desktop.interface cursor-size "$size"
+  persist_hypr "$theme" "$size" size
   exit 0
 fi
 
 theme=${1-}
 if [[ -z $theme || $theme == -* || $theme == */* || $theme == *..* ]]; then
   echo "Usage: omarchy-cursor-set <theme-directory-name>" >&2
+  echo "       omarchy-cursor-set --size <pixels>" >&2
   echo "       omarchy-cursor-current" >&2
   exit 2
 fi
@@ -52,24 +102,4 @@ size=$(cursor_size)
 hyprctl setcursor "$theme" "$size"
 gsettings set org.gnome.desktop.interface cursor-theme "$theme"
 gsettings set org.gnome.desktop.interface cursor-size "$size"
-
-python3 - "$HYPR_CONFIG" "$theme" << 'PY'
-import os, re, sys
-path, theme = sys.argv[1:]
-lua = theme.replace("\\", "\\\\").replace('"', '\\"')
-text = open(path).read() if os.path.exists(path) else ""
-if text and not text.endswith("\n"):
-    text += "\n"
-replacements = {
-    "XCURSOR_THEME": f'hl.env("XCURSOR_THEME", "{lua}")\n',
-    "HYPRCURSOR_THEME": f'hl.env("HYPRCURSOR_THEME", "{lua}")\n',
-}
-for key, repl in replacements.items():
-    pat = re.compile(rf'^hl\.env\("{key}", ".*"\)\n', re.M)
-    if pat.search(text):
-        text = pat.sub(repl, text, count=1)
-    else:
-        text += repl
-os.makedirs(os.path.dirname(path), exist_ok=True)
-open(path, "w").write(text)
-PY
+persist_hypr "$theme" "$size" theme

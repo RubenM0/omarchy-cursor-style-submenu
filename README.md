@@ -1,8 +1,6 @@
 # omarchy-cursor-style-submenu
 
-Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a theme switches the pointer immediately and keeps that choice across login. **Omarchy default** is the first item and restores Adwaita at size 24. **Size** is next and offers 8, 16, 32, 64, and 128. Choosing a theme after a reset applies that theme again.
-
-Cursor artwork is not in this repo. Install the themes yourself; a row is hidden until its folder is present.
+Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a cursor theme switches the cursor. **Omarchy default** restores the default Adwaita and the 24 size. **Size** allows for 8, 16, 32, 64, and 128 cursor sizing.
 
 ## Install
 
@@ -14,15 +12,13 @@ cd omarchy-cursor-style-submenu
 
 The installer copies `omarchy-cursor-set` to `~/.local/bin` and merges the menu into `~/.config/omarchy/extensions/omarchy-menu.jsonc`. Re-running it adds missing rows and does not replace entries that are already there.
 
-## Themes this menu knows
+## Themes setup
 
-Put each theme in `~/.local/share/icons/<name>/` (or `~/.icons/<name>/`). The folder name is the theme name.
+Put each theme in `~/.local/share/icons/` (or `~/.icons/`). The folder name is the theme name.
 
-- [Retrosmart Xcursor](https://www.gnome-look.org/p/2366625) — Linux archives `retrosmart-cursor-classic` and `retrosmart-cursor-extras`. Folders are `retrosmart-xcursor-*`.
-- [Kasane Teto [Winged] Cursor](https://www.gnome-look.org/p/2347588) — folder `tetoW`.
+## A personal favourite cursor
+
 - [Korkhon 2.0](https://www.gnome-look.org/p/2374211) — folder `Korkhon 2.0`.
-
-Menu layout: Omarchy default, Size, then Teto, Korkhon, and Retrosmart Win-ish, Mac-ish, Cur-font, and Win 3D.
 
 ## Switch from a terminal
 

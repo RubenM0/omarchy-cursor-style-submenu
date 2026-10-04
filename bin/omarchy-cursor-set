@@ -1,0 +1,75 @@
+#!/bin/bash
+# Apply an Xcursor theme and keep it across login.
+# omarchy-cursor-current prints the active theme name.
+
+set -euo pipefail
+
+HYPR_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprland.lua"
+
+cursor_current() {
+  local theme
+  theme=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null || true)
+  theme=${theme#\'}
+  theme=${theme%\'}
+  printf '%s\n' "$theme"
+}
+
+cursor_size() {
+  local size
+  size=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null || true)
+  size=${size//[^0-9]/}
+  if [[ -z $size && -f $HYPR_CONFIG ]]; then
+    size=$(sed -n 's/^hl.env("XCURSOR_SIZE", "\([0-9][0-9]*\)").*/\1/p' "$HYPR_CONFIG" | head -1)
+  fi
+  printf '%s\n' "${size:-32}"
+}
+
+if [[ ${1-} == --current || $(basename "$0") == omarchy-cursor-current ]]; then
+  cursor_current
+  exit 0
+fi
+
+theme=${1-}
+if [[ -z $theme || $theme == -* || $theme == */* || $theme == *..* ]]; then
+  echo "Usage: omarchy-cursor-set <theme-directory-name>" >&2
+  echo "       omarchy-cursor-current" >&2
+  exit 2
+fi
+
+found=
+for dir in "$HOME/.local/share/icons" "$HOME/.icons" /usr/share/icons; do
+  if [[ -d $dir/$theme/cursors ]]; then
+    found=1
+    break
+  fi
+done
+if [[ -z $found ]]; then
+  echo "Cursor theme not found: $theme" >&2
+  exit 1
+fi
+
+size=$(cursor_size)
+hyprctl setcursor "$theme" "$size"
+gsettings set org.gnome.desktop.interface cursor-theme "$theme"
+gsettings set org.gnome.desktop.interface cursor-size "$size"
+
+python3 - "$HYPR_CONFIG" "$theme" << 'PY'
+import os, re, sys
+path, theme = sys.argv[1:]
+lua = theme.replace("\\", "\\\\").replace('"', '\\"')
+text = open(path).read() if os.path.exists(path) else ""
+if text and not text.endswith("\n"):
+    text += "\n"
+replacements = {
+    "XCURSOR_THEME": f'hl.env("XCURSOR_THEME", "{lua}")\n',
+    "HYPRCURSOR_THEME": f'hl.env("HYPRCURSOR_THEME", "{lua}")\n',
+}
+for key, repl in replacements.items():
+    pat = re.compile(rf'^hl\.env\("{key}", ".*"\)\n', re.M)
+    if pat.search(text):
+        text = pat.sub(repl, text, count=1)
+    else:
+        text += repl
+os.makedirs(os.path.dirname(path), exist_ok=True)
+open(path, "w").write(text)
+PY

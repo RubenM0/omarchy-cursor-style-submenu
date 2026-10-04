@@ -42,14 +42,26 @@ if '"style.cursor"' in text:
         ]
         text = insert_after(text, '"style.cursor":', default_lines)
         changed = True
+    size_lines = [
+        line for line in fragment.splitlines()
+        if '"style.cursor.size' in line
+    ]
     if '"style.cursor.size"' not in text:
-        size_lines = [
-            line for line in fragment.splitlines()
-            if '"style.cursor.size' in line
-        ]
         marker = '"style.cursor.default":' if '"style.cursor.default":' in text else '"style.cursor":'
         text = insert_after(text, marker, size_lines)
         changed = True
+    else:
+        previous = '"style.cursor.size":'
+        for line in size_lines:
+            key = line.split(":", 1)[0].strip()
+            if key == '"style.cursor.size"':
+                continue
+            if key in text:
+                previous = key + ":"
+                continue
+            text = insert_after(text, previous, [line])
+            previous = key + ":"
+            changed = True
     if changed:
         open(menu_path, "w").write(text)
         print(f"updated cursor menu in {menu_path}")

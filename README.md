@@ -1,6 +1,6 @@
 # omarchy-cursor-style-submenu
 
-Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a cursor theme switches the cursor. **Omarchy default** restores the default Adwaita and the 24 size. **Size** allows for 8, 16, 32, 64, and 128 cursor sizing.
+Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a cursor theme switches the cursor. **Omarchy default** restores the default Adwaita and the 24 size. **Size** lets you change the cursor size.
 
 ## Install
 

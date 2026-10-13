@@ -1,6 +1,6 @@
 # omarchy-cursor-style-submenu
 
-Adds a **Cursor** row under **Style** in the Omarchy menu. Picking a cursor theme switches the cursor. **Omarchy default** restores the default Adwaita and the 24 size. **Size** lets you change the cursor size.
+A personal problem with Omarchy's customisation is the lack of cursor customisation. This adds a Cursor row under Style in the Omarchy menu. Picking a cursor theme switches the cursor (who would've guessed). Omarchy default restores the default Adwaita and the 24 size. Size lets you change the cursor size.
 
 ## Install
 
@@ -10,15 +10,13 @@ cd omarchy-cursor-style-submenu
 ./install.sh
 ```
 
-The installer copies `omarchy-cursor-set` to `~/.local/bin` and merges the menu into `~/.config/omarchy/extensions/omarchy-menu.jsonc`. Re-running it adds missing rows and does not replace entries that are already there.
-
-## Themes setup
+## IMPORTANT THEMES SETUP
 
 Put each theme in `~/.local/share/icons/` (or `~/.icons/`). The folder name is the theme name.
 
-## A personal favourite cursor
+## A personal favourite cursor to get started
 
-- [Korkhon 2.0](https://www.gnome-look.org/p/2374211) — folder `Korkhon 2.0`.
+- [Korkhon 2.0](https://www.gnome-look.org/p/2374211)
 
 ## Switch from a terminal
 

@@ -22,60 +22,21 @@ import sys
 menu_path, fragment_path = sys.argv[1:]
 text = open(menu_path).read()
 fragment = open(fragment_path).read().strip("\n")
-def insert_after(text, marker, lines):
-    if not lines:
-        return text
-    idx = text.find(marker)
-    if idx < 0:
-        raise SystemExit(f"{marker} not found")
-    end = text.find("\n", idx)
-    if end < 0:
-        raise SystemExit(f"{marker} row has no newline")
-    return text[:end + 1] + "\n".join(lines) + "\n" + text[end + 1:]
 
-if '"style.cursor"' in text:
-    changed = False
-    if '"style.cursor.default"' not in text:
-        default_lines = [
-            line for line in fragment.splitlines()
-            if '"style.cursor.default"' in line
-        ]
-        text = insert_after(text, '"style.cursor":', default_lines)
-        changed = True
-    size_lines = [
-        line for line in fragment.splitlines()
-        if '"style.cursor.size' in line
-    ]
-    if '"style.cursor.size"' not in text:
-        marker = '"style.cursor.default":' if '"style.cursor.default":' in text else '"style.cursor":'
-        text = insert_after(text, marker, size_lines)
-        changed = True
-    else:
-        previous = '"style.cursor.size":'
-        for line in size_lines:
-            key = line.split(":", 1)[0].strip()
-            if key == '"style.cursor.size"':
-                continue
-            if key in text:
-                previous = key + ":"
-                continue
-            text = insert_after(text, previous, [line])
-            previous = key + ":"
-            changed = True
-    if changed:
-        open(menu_path, "w").write(text)
-        print(f"updated cursor menu in {menu_path}")
-    else:
-        print("menu already has style.cursor; left it unchanged")
-    raise SystemExit(0)
-idx = text.rfind("}")
+def is_cursor_row(line):
+    stripped = line.lstrip()
+    return stripped.startswith('"style.cursor":') or stripped.startswith('"style.cursor.')
+
+kept = [line for line in text.splitlines() if not is_cursor_row(line)]
+body = "\n".join(kept).rstrip()
+idx = body.rfind("}")
 if idx < 0:
     raise SystemExit(f"no closing brace in {menu_path}")
-head = text[:idx].rstrip()
+head = body[:idx].rstrip()
 if not head.endswith("{") and not head.endswith(","):
     head += ","
-open(menu_path, "w").write(head + "\n" + fragment + "\n" + text[idx:])
-print(f"merged cursor menu into {menu_path}")
+open(menu_path, "w").write(head + "\n" + fragment + "\n" + body[idx:])
+print(f"refreshed cursor menu in {menu_path}")
 PY
 
 if command -v omarchy >/dev/null 2>&1; then

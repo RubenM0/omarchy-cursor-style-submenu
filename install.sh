@@ -17,6 +17,8 @@ if [[ ! -f $MENU ]]; then
   printf '{\n}\n' > "$MENU"
 fi
 
+python3 "$ROOT/bin/omarchy-cursor-menu" "$ROOT/menu-entries.jsonc"
+
 python3 - "$MENU" "$ROOT/menu-entries.jsonc" << 'PY'
 import sys
 menu_path, fragment_path = sys.argv[1:]

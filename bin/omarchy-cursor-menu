@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""Build the Style > Cursor menu from cursor themes installed on this machine.
+
+Scans ~/.local/share/icons, ~/.icons, and /usr/share/icons for directories
+that contain cursors/. Retrosmart packs stay grouped. Every other theme is a
+row on the Cursor menu. Omarchy cannot rescan this list itself, so install.sh
+runs this generator again after a theme is added or removed.
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+ICON = "\U000f01c0"
+SIZES = (8, 10, 12, 16, 20, 24, 28, 32, 64, 128)
+ROOTS = (
+    Path.home() / ".local/share/icons",
+    Path.home() / ".icons",
+    Path("/usr/share/icons"),
+)
+
+# Familiar labels that the folder name does not already spell out.
+LOOSE_LABELS = {
+    "tetoW": "Teto",
+}
+LOOSE_IDS = {
+    "tetoW": "teto",
+    "Korkhon 2.0": "korkhon",
+}
+
+GROUPS = (
+    ("win-ish", "retrosmart-xcursor-win-ish-", "Win-ish", "Win-ish"),
+    ("mac-ish", "retrosmart-xcursor-mac-ish-", "Mac-ish", "Mac-ish"),
+    ("cur-font", "retrosmart-xcursor-cur-font-", "Cur-font", "Cur-font"),
+)
+WIN3D_PREFIX = "retrosmart-xcursor-win-3d-"
+WIN3D_SUFFIXES = (
+    "hand_stopwatch-shadow",
+    "hand_stopwatch",
+    "hourglass-shadow",
+    "hourglass",
+    "shadow",
+)
+WIN3D_COLORS = {"blue": 0, "green": 1, "red": 2, "violet": 3}
+WIN3D_VARIANTS = {
+    "": 0,
+    "shadow": 1,
+    "hourglass": 2,
+    "hourglass-shadow": 3,
+    "hand_stopwatch": 4,
+    "hand_stopwatch-shadow": 5,
+}
+RESERVED = {"default", "size", "win-ish", "mac-ish", "cur-font", "win-3d"}
+
+
+def discover():
+    found = {}
+    for root in ROOTS:
+        if not root.is_dir():
+            continue
+        for entry in root.iterdir():
+            name = entry.name
+            if name in found or name == "default" or name.startswith("."):
+                continue
+            if name.startswith("-") or ".." in name or any(ord(ch) < 32 for ch in name):
+                continue
+            if entry.is_dir() and (entry / "cursors").is_dir():
+                found[name] = entry
+    return found
+
+
+def slug(value):
+    text = re.sub(r"[^a-z0-9]+", "-", value.lower().replace("_", "-"))
+    return text.strip("-") or "item"
+
+
+def unique(base, taken):
+    candidate = base
+    number = 2
+    while candidate in taken:
+        candidate = f"{base}-{number}"
+        number += 1
+    taken.add(candidate)
+    return candidate
+
+
+def shell_single(value):
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def pretty_words(value):
+    words = []
+    for word in value.replace("_", " ").replace("-", " ").split():
+        if word.lower() == "catppucin":
+            words.append("Catppuccin")
+        else:
+            words.append(word.capitalize())
+    return " ".join(words)
+
+
+def pretty_variant(variant):
+    if variant == "":
+        return "Pointer"
+    if variant == "hand_stopwatch":
+        return "Hand"
+    if variant == "hand_stopwatch-shadow":
+        return "Hand Shadow"
+    return pretty_words(variant)
+
+
+def variant_sort_key(variant):
+    base = variant[: -len("-shadow")] if variant.endswith("-shadow") else variant
+    priority = {"classic": 0, "inverted": 1}.get(base, 2)
+    return (priority, base, variant.endswith("-shadow"), variant)
+
+
+def row(key, fields):
+    payload = json.dumps(fields, ensure_ascii=False, separators=(", ", ":"))
+    return f'  "{key}": {payload},'
+
+
+def theme_row(key, label, theme):
+    return row(key, {
+        "icon": ICON,
+        "label": label,
+        "checked": f'[[ "$(omarchy-cursor-current)" == {shell_single(theme)} ]]',
+        "action": f"omarchy-cursor-set {shell_single(theme)}",
+        "description": theme,
+    })
+
+
+def submenu(key, label, title):
+    return row(key, {"icon": ICON, "label": label, "title": title})
+
+
+def classify(names):
+    grouped = {group[0]: [] for group in GROUPS}
+    win3d = {}
+    loose = []
+    for name in names:
+        matched = False
+        for group_id, prefix, _label, _title in GROUPS:
+            if name.startswith(prefix) and len(name) > len(prefix):
+                grouped[group_id].append((name[len(prefix):], name))
+                matched = True
+                break
+        if matched:
+            continue
+        parsed = parse_win3d(name)
+        if parsed is not None:
+            color, variant = parsed
+            win3d.setdefault(color, []).append((variant, name))
+            continue
+        loose.append(name)
+    return grouped, win3d, loose
+
+
+def parse_win3d(name):
+    if not name.startswith(WIN3D_PREFIX) or len(name) == len(WIN3D_PREFIX):
+        return None
+    rest = name[len(WIN3D_PREFIX):]
+    for suffix in WIN3D_SUFFIXES:
+        tail = "-" + suffix
+        if rest.endswith(tail) and len(rest) > len(tail):
+            return rest[: -len(tail)], suffix
+    if rest in WIN3D_SUFFIXES:
+        return None
+    return rest, ""
+
+
+def static_rows():
+    lines = [
+        submenu("style.cursor", "Cursor", "Mouse Cursor"),
+        row("style.cursor.default", {
+            "icon": ICON,
+            "label": "Omarchy default",
+            "checked": '[[ "$(omarchy-cursor-current)" == default && "$(omarchy-cursor-size)" == 24 ]]',
+            "action": "omarchy-cursor-set --default",
+        }),
+        submenu("style.cursor.size", "Size", "Cursor Size"),
+    ]
+    for size in SIZES:
+        lines.append(row(f"style.cursor.size.{size}", {
+            "icon": ICON,
+            "label": str(size),
+            "checked": f'[[ "$(omarchy-cursor-size)" == {size} ]]',
+            "action": f"omarchy-cursor-set --size {size}",
+        }))
+    return lines
+
+
+def loose_rows(names):
+    taken = set(RESERVED)
+    lines = []
+    for name in sorted(names, key=lambda item: (item.lower(), item)):
+        item_id = unique(LOOSE_IDS.get(name, slug(name)), taken)
+        lines.append(theme_row(
+            f"style.cursor.{item_id}",
+            LOOSE_LABELS.get(name, name),
+            name,
+        ))
+    return lines
+
+
+def group_rows(grouped):
+    lines = []
+    for group_id, _prefix, label, title in GROUPS:
+        items = sorted(grouped[group_id], key=lambda item: variant_sort_key(item[0]))
+        if not items:
+            continue
+        lines.append(submenu(f"style.cursor.{group_id}", label, title))
+        taken = set()
+        for variant, theme in items:
+            item_id = unique(slug(variant), taken)
+            lines.append(theme_row(f"style.cursor.{group_id}.{item_id}", pretty_variant(variant), theme))
+    return lines
+
+
+def win3d_rows(win3d):
+    if not win3d:
+        return []
+    lines = [submenu("style.cursor.win-3d", "Win 3D", "Win 3D")]
+    colors = sorted(win3d, key=lambda color: (WIN3D_COLORS.get(color, 100), color))
+    taken_colors = set()
+    for color in colors:
+        items = sorted(win3d[color], key=lambda item: (WIN3D_VARIANTS.get(item[0], 100), item[0]))
+        if not items:
+            continue
+        color_id = unique(slug(color), taken_colors)
+        label = pretty_words(color)
+        lines.append(submenu(
+            f"style.cursor.win-3d.{color_id}",
+            label,
+            f"Win 3D {label}",
+        ))
+        taken = set()
+        for variant, theme in items:
+            item_id = unique(slug(variant) if variant else "pointer", taken)
+            lines.append(theme_row(
+                f"style.cursor.win-3d.{color_id}.{item_id}",
+                pretty_variant(variant),
+                theme,
+            ))
+    return lines
+
+
+def build():
+    grouped, win3d, loose = classify(discover())
+    lines = []
+    lines.extend(static_rows())
+    lines.extend(loose_rows(loose))
+    lines.extend(group_rows(grouped))
+    lines.extend(win3d_rows(win3d))
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate the Style > Cursor menu fragment.")
+    parser.add_argument("output", nargs="?", help="Write the fragment to this path instead of stdout.")
+    args = parser.parse_args()
+    text = build()
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+
+
+if __name__ == "__main__":
+    main()

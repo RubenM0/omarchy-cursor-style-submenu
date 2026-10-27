@@ -1,7 +1,8 @@
 #!/bin/bash
 # Apply an Xcursor theme or size and keep it across login.
-# omarchy-cursor-current prints the active theme name.
-# omarchy-cursor-size prints the active size.
+# GTK settings and ~/.icons/default follow the same choice, so XWayland and
+# GTK apps do not stay on the previous cursor. omarchy-cursor-current prints
+# the active theme name. omarchy-cursor-size prints the active size.
 
 set -euo pipefail
 
@@ -22,13 +23,22 @@ cursor_size() {
   if [[ -z $size && -f $HYPR_CONFIG ]]; then
     size=$(sed -n 's/^hl.env("XCURSOR_SIZE", "\([0-9][0-9]*\)").*/\1/p' "$HYPR_CONFIG" | head -1)
   fi
-  printf '%s\n' "${size:-32}"
+  printf '%s\n' "${size:-24}"
 }
 
 # Hyprland needs a theme directory that contains cursors/. Omarchy's "default"
 # theme only inherits Adwaita, so follow one Inherits= hop when needed.
+# ~/.icons/default is our own XWayland fallback, so never treat it as the source
+# of the stock theme.
 hypr_theme() {
   local theme=$1 dir inherits
+  if [[ $theme == default ]]; then
+    inherits=$(sed -n 's/^Inherits=//p' /usr/share/icons/default/index.theme 2>/dev/null | head -1)
+    inherits=${inherits%%,*}
+    inherits=${inherits// /}
+    printf '%s\n' "${inherits:-Adwaita}"
+    return
+  fi
   for dir in "$HOME/.local/share/icons" "$HOME/.icons" /usr/share/icons; do
     if [[ -d $dir/$theme/cursors ]]; then
       printf '%s\n' "$theme"
@@ -60,6 +70,8 @@ keys = ("XCURSOR_THEME", "HYPRCURSOR_THEME", "XCURSOR_SIZE", "HYPRCURSOR_SIZE")
 for key in keys:
     text = re.sub(rf'^hl\.env\("{key}", ".*"\)\n', "", text, flags=re.M)
 text = re.sub(r"\n{3,}", "\n\n", text)
+if open(path).read() == text:
+    raise SystemExit(0)
 open(path, "w").write(text)
 PY
 }
@@ -86,8 +98,87 @@ for key, repl in replacements.items():
         text = pat.sub(repl, text, count=1)
     else:
         text += repl
+if os.path.exists(path) and open(path).read() == text:
+    raise SystemExit(0)
 os.makedirs(os.path.dirname(path), exist_ok=True)
 open(path, "w").write(text)
+PY
+}
+
+# GTK reads settings.ini. XWayland and Electron fall back to ~/.icons/default.
+# The gsettings name stays "default" for Omarchy's stock cursor; the X fallback
+# must inherit Adwaita, because the default theme has no cursors/ of its own.
+write_desktop_cursor() {
+  local theme=$1 size=$2 inherits=$3
+  local config="${XDG_CONFIG_HOME:-$HOME/.config}"
+  python3 - "$theme" "$size" "$inherits" \
+    "$config/gtk-3.0/settings.ini" \
+    "$config/gtk-4.0/settings.ini" \
+    "$HOME/.icons/default/index.theme" << 'PY'
+import os, sys
+theme, size, inherits, gtk3, gtk4, index = sys.argv[1:]
+
+def write_if_changed(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.exists(path) and open(path, encoding="utf-8").read() == text:
+        return
+    open(path, "w", encoding="utf-8").write(text)
+
+def update_ini(path, section, updates):
+    original = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    newline = "\r\n" if "\r\n" in original else "\n"
+    lines = original.splitlines()
+    header = f"[{section}]"
+    start = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(header)
+        lines.extend(f"{key}={value}" for key, value in updates.items())
+    else:
+        end = len(lines)
+        for i in range(start + 1, len(lines)):
+            stripped = lines[i].strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                end = i
+                break
+        seen = set()
+        for i in range(start + 1, end):
+            stripped = lines[i].strip()
+            if not stripped or stripped[0] in "#;":
+                continue
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                lines[i] = f"{key}={updates[key]}"
+                seen.add(key)
+        missing = [f"{key}={value}" for key, value in updates.items() if key not in seen]
+        if missing:
+            lines[end:end] = missing
+    text = newline.join(lines)
+    if text and not text.endswith(newline):
+        text += newline
+    write_if_changed(path, text)
+
+updates = {}
+if theme:
+    updates["gtk-cursor-theme-name"] = theme
+if size:
+    updates["gtk-cursor-theme-size"] = size
+if updates:
+    for path in (gtk3, gtk4):
+        update_ini(path, "Settings", updates)
+
+if inherits:
+    if not os.path.exists(index) or os.path.getsize(index) == 0:
+        write_if_changed(
+            index,
+            "[Icon Theme]\n"
+            "Name=Default\n"
+            "Comment=Default Cursor Theme\n"
+            f"Inherits={inherits}\n",
+        )
+    else:
+        update_ini(index, "Icon Theme", {"Inherits": inherits})
 PY
 }
 
@@ -103,10 +194,15 @@ if [[ $cmd == omarchy-cursor-size && $# -eq 0 ]]; then
 fi
 
 if [[ ${1-} == --default ]]; then
-  hyprctl setcursor "$(hypr_theme default)" 24
+  inherits=$(hypr_theme default)
+  if [[ -z $inherits || $inherits == default ]]; then
+    inherits=Adwaita
+  fi
+  hyprctl setcursor "$inherits" 24
   gsettings set org.gnome.desktop.interface cursor-theme default
   gsettings set org.gnome.desktop.interface cursor-size 24
   clear_cursor_overrides
+  write_desktop_cursor default 24 "$inherits"
   exit 0
 fi
 
@@ -117,11 +213,17 @@ if [[ ${1-} == --size ]]; then
     exit 2
   fi
   theme=$(cursor_current)
+  inherits=
   if [[ -n $theme ]]; then
-    hyprctl setcursor "$(hypr_theme "$theme")" "$size"
+    inherits=$(hypr_theme "$theme")
+    if [[ $theme == default && ( -z $inherits || $inherits == default ) ]]; then
+      inherits=Adwaita
+    fi
+    hyprctl setcursor "$inherits" "$size"
   fi
   gsettings set org.gnome.desktop.interface cursor-size "$size"
   persist_hypr "$theme" "$size" size
+  write_desktop_cursor "$theme" "$size" "$inherits"
   exit 0
 fi
 
@@ -147,7 +249,9 @@ if [[ -z $found ]]; then
 fi
 
 size=$(cursor_size)
-hyprctl setcursor "$(hypr_theme "$theme")" "$size"
+inherits=$(hypr_theme "$theme")
+hyprctl setcursor "$inherits" "$size"
 gsettings set org.gnome.desktop.interface cursor-theme "$theme"
 gsettings set org.gnome.desktop.interface cursor-size "$size"
 persist_hypr "$theme" "$size" theme
+write_desktop_cursor "$theme" "$size" "$inherits"

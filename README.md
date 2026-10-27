@@ -10,13 +10,17 @@ cd omarchy-cursor-style-submenu
 ./install.sh
 ```
 
-## IMPORTANT THEMES SETUP
+## Themes
 
-Put each theme in `~/.local/share/icons/` (or `~/.icons/`). The folder name is the theme name.
+Put each theme in `~/.local/share/icons/` (or `~/.icons/`). Themes already in `/usr/share/icons/` are included too. The folder name is the theme name.
+
+`./install.sh` rebuilds Style → Cursor from those folders. Run it again after adding or removing a theme. Retrosmart packs stay grouped under Win-ish, Mac-ish, Cur-font, and Win 3D. Anything else is listed on the Cursor menu. The menu cannot rescan by itself.
 
 ## A personal favourite cursor to get started
 
 - [Korkhon 2.0](https://www.gnome-look.org/p/2374211)
+
+Switching also writes the GTK cursor settings and `~/.icons/default`, so XWayland and GTK apps follow the same theme and size. An app that is already open may keep the old cursor until it is restarted.
 
 ## Switch from a terminal
 

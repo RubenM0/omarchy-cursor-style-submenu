@@ -1,12 +1,15 @@
 #!/bin/bash
 # Apply an Xcursor theme or size and keep it across login.
 # GTK settings and ~/.icons/default follow the same choice, so XWayland and
-# GTK apps do not stay on the previous cursor. omarchy-cursor-current prints
-# the active theme name. omarchy-cursor-size prints the active size.
+# GTK apps do not stay on the previous cursor. Pointer speed is Hyprland's
+# input.sensitivity, from -1 to 1. omarchy-cursor-current prints the active
+# theme name. omarchy-cursor-size prints the active size. omarchy-cursor-speed
+# prints the active sensitivity.
 
 set -euo pipefail
 
 HYPR_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprland.lua"
+HYPR_INPUT="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/input.lua"
 
 cursor_current() {
   local theme
@@ -24,6 +27,38 @@ cursor_size() {
     size=$(sed -n 's/^hl.env("XCURSOR_SIZE", "\([0-9][0-9]*\)").*/\1/p' "$HYPR_CONFIG" | head -1)
   fi
   printf '%s\n' "${size:-24}"
+}
+
+# Print a stable label. Menu checks compare against these exact strings.
+cursor_speed() {
+  hyprctl getoption input:sensitivity -j 2>/dev/null | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+value = 0.0
+if raw:
+    try:
+        value = float(json.loads(raw).get("float", 0))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        value = 0.0
+steps = (
+    (-1, "-1"),
+    (-0.75, "-0.75"),
+    (-0.5, "-0.5"),
+    (-0.25, "-0.25"),
+    (0, "0"),
+    (0.25, "0.25"),
+    (0.5, "0.5"),
+    (0.75, "0.75"),
+    (1, "1"),
+)
+for step, label in steps:
+    if abs(value - step) < 0.001:
+        print(label)
+        break
+else:
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    print("0" if text in ("", "-0") else text)
+'
 }
 
 # Hyprland needs a theme directory that contains cursors/. Omarchy's "default"
@@ -182,6 +217,111 @@ if inherits:
 PY
 }
 
+# Keep the override in a marked block so the commented input.lua template stays
+# untouched. 0 removes the block and returns to Omarchy's sensitivity.
+persist_speed() {
+  local speed=$1
+  python3 - "$HYPR_INPUT" "$speed" << 'PY'
+import os, sys
+path, speed = sys.argv[1:]
+begin = "-- BEGIN omarchy-cursor-set pointer speed"
+end = "-- END omarchy-cursor-set pointer speed"
+
+def strip_block(text):
+    lines = text.splitlines(keepends=True)
+    start = stop = None
+    for i, line in enumerate(lines):
+        if line.startswith(begin):
+            start = i
+        elif start is not None and line.startswith(end):
+            stop = i
+            break
+    if start is None or stop is None:
+        return text
+    drop_from = start - 1 if start > 0 and lines[start - 1].strip() == "" else start
+    del lines[drop_from:stop + 1]
+    return "".join(lines)
+
+text = open(path).read() if os.path.exists(path) else ""
+text = strip_block(text)
+if speed != "0":
+    if text and not text.endswith("\n"):
+        text += "\n"
+    if text and not text.endswith("\n\n"):
+        text += "\n"
+    text += (
+        f"{begin}\n"
+        "hl.config({\n"
+        "  input = {\n"
+        f"    sensitivity = {speed},\n"
+        "  },\n"
+        "})\n"
+        f"{end}\n"
+    )
+if os.path.exists(path) and open(path).read() == text:
+    print("unchanged")
+    raise SystemExit(0)
+os.makedirs(os.path.dirname(path), exist_ok=True)
+open(path, "w").write(text)
+print("changed")
+PY
+}
+
+apply_speed() {
+  local speed=$1 normalized status errors backup
+  if ! normalized=$(python3 -c '
+import math, sys
+try:
+    value = float(sys.argv[1])
+except ValueError:
+    raise SystemExit(2)
+if not math.isfinite(value) or value < -1 or value > 1:
+    raise SystemExit(2)
+steps = (-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1)
+for step in steps:
+    if abs(value - step) < 0.001:
+        value = step
+        break
+if abs(value) < 1e-9:
+    print("0")
+elif abs(value - round(value)) < 1e-9:
+    print(int(round(value)))
+else:
+    print(f"{value:.4f}".rstrip("0").rstrip("."))
+' "$speed"); then
+    echo "Usage: omarchy-cursor-set --speed <sensitivity>" >&2
+    echo "Sensitivity is from -1 to 1. 0 is Omarchy's default." >&2
+    exit 2
+  fi
+  backup=$(mktemp /tmp/opencode/cursor-speed.XXXXXX)
+  if [[ -f $HYPR_INPUT ]]; then
+    cp "$HYPR_INPUT" "$backup"
+  else
+    : > "$backup"
+  fi
+  status=$(persist_speed "$normalized")
+  if [[ $status == changed ]]; then
+    if ! hyprctl reload >/dev/null 2>&1; then
+      cp "$backup" "$HYPR_INPUT"
+      hyprctl reload >/dev/null 2>&1 || true
+      rm -f "$backup"
+      echo "Hyprland rejected the pointer speed change." >&2
+      exit 1
+    fi
+    errors=$(hyprctl configerrors 2>&1 || true)
+    if [[ -n ${errors//[[:space:]]/} ]]; then
+      cp "$backup" "$HYPR_INPUT"
+      hyprctl reload >/dev/null 2>&1 || true
+      rm -f "$backup"
+      echo "Hyprland rejected the pointer speed change." >&2
+      printf '%s\n' "$errors" >&2
+      exit 1
+    fi
+  fi
+  rm -f "$backup"
+  hyprctl eval "hl.config({ input = { sensitivity = ${normalized} } })" >/dev/null
+}
+
 cmd=$(basename "$0")
 if [[ ${1-} == --current || $cmd == omarchy-cursor-current ]]; then
   cursor_current
@@ -190,6 +330,11 @@ fi
 
 if [[ $cmd == omarchy-cursor-size && $# -eq 0 ]]; then
   cursor_size
+  exit 0
+fi
+
+if [[ $cmd == omarchy-cursor-speed && $# -eq 0 ]]; then
+  cursor_speed
   exit 0
 fi
 
@@ -227,10 +372,21 @@ if [[ ${1-} == --size ]]; then
   exit 0
 fi
 
+if [[ ${1-} == --speed ]]; then
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: omarchy-cursor-set --speed <sensitivity>" >&2
+    echo "Sensitivity is from -1 to 1. 0 is Omarchy's default." >&2
+    exit 2
+  fi
+  apply_speed "$2"
+  exit 0
+fi
+
 theme=${1-}
 if [[ -z $theme || $theme == -* || $theme == */* || $theme == *..* ]]; then
   echo "Usage: omarchy-cursor-set <theme-directory-name>" >&2
   echo "       omarchy-cursor-set --size <pixels>" >&2
+  echo "       omarchy-cursor-set --speed <sensitivity>" >&2
   echo "       omarchy-cursor-set --default" >&2
   echo "       omarchy-cursor-current" >&2
   exit 2

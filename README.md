@@ -1,6 +1,6 @@
 # omarchy-cursor-style-submenu
 
-A personal problem with Omarchy's customisation is the lack of cursor customisation. This adds a Cursor row under Style in the Omarchy menu. Picking a cursor theme switches the cursor (who would've guessed). Omarchy default restores the default Adwaita and the 24 size. Size lets you change the cursor size.
+A personal problem with Omarchy's customisation is the lack of cursor customisation. This adds a Cursor row under Style in the Omarchy menu. Picking a cursor theme switches the cursor (who would've guessed). Omarchy default restores the default Adwaita and the 24 size. Size lets you change the cursor size. Speed changes pointer sensitivity from -1 to 1. 0 is Omarchy's default and does not change mouse acceleration.
 
 ## Install
 
@@ -28,6 +28,9 @@ Switching also writes the GTK cursor settings and `~/.icons/default`, so XWaylan
 omarchy-cursor-set tetoW
 omarchy-cursor-set --default
 omarchy-cursor-set --size 32
+omarchy-cursor-set --speed 0.25
+omarchy-cursor-set --speed 0
 omarchy-cursor-current
 omarchy-cursor-size
+omarchy-cursor-speed
 ```

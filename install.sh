@@ -11,6 +11,7 @@ install -d "$BIN_DIR"
 install -m 0755 "$ROOT/bin/omarchy-cursor-set" "$BIN_DIR/omarchy-cursor-set"
 ln -sfn omarchy-cursor-set "$BIN_DIR/omarchy-cursor-current"
 ln -sfn omarchy-cursor-set "$BIN_DIR/omarchy-cursor-size"
+ln -sfn omarchy-cursor-set "$BIN_DIR/omarchy-cursor-speed"
 
 install -d "$(dirname "$MENU")"
 if [[ ! -f $MENU ]]; then

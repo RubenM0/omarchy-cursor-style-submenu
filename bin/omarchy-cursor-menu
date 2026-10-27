@@ -15,6 +15,18 @@ from pathlib import Path
 
 ICON = "\U000f01c0"
 SIZES = (8, 10, 12, 16, 20, 24, 28, 32, 64, 128)
+# Hyprland pointer sensitivity. 0 is unmodified. Labels are what omarchy-cursor-speed prints.
+SPEEDS = (
+    ("n1", "-1"),
+    ("n075", "-0.75"),
+    ("n05", "-0.5"),
+    ("n025", "-0.25"),
+    ("0", "0"),
+    ("025", "0.25"),
+    ("05", "0.5"),
+    ("075", "0.75"),
+    ("1", "1"),
+)
 ROOTS = (
     Path.home() / ".local/share/icons",
     Path.home() / ".icons",
@@ -52,7 +64,7 @@ WIN3D_VARIANTS = {
     "hand_stopwatch": 4,
     "hand_stopwatch-shadow": 5,
 }
-RESERVED = {"default", "size", "win-ish", "mac-ish", "cur-font", "win-3d"}
+RESERVED = {"default", "size", "speed", "win-ish", "mac-ish", "cur-font", "win-3d"}
 
 
 def discover():
@@ -188,6 +200,17 @@ def static_rows():
             "checked": f'[[ "$(omarchy-cursor-size)" == {size} ]]',
             "action": f"omarchy-cursor-set --size {size}",
         }))
+    lines.append(submenu("style.cursor.speed", "Speed", "Pointer Speed"))
+    for item_id, label in SPEEDS:
+        fields = {
+            "icon": ICON,
+            "label": label,
+            "checked": f'[[ "$(omarchy-cursor-speed)" == "{label}" ]]',
+            "action": f"omarchy-cursor-set --speed {label}",
+        }
+        if label == "0":
+            fields["description"] = "Omarchy default"
+        lines.append(row(f"style.cursor.speed.{item_id}", fields))
     return lines
 
 

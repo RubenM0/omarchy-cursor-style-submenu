@@ -3,12 +3,13 @@
 
 Scans ~/.local/share/icons, ~/.icons, and /usr/share/icons for directories
 that contain cursors/. Retrosmart packs stay grouped. Every other theme is a
-row on the Cursor menu. Omarchy cannot rescan this list itself, so install.sh
-runs this generator again after a theme is added or removed.
+row on the Cursor menu. cursor-menu reload runs this scan and reloads the
+running menu.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -279,10 +280,52 @@ def build():
     return "\n".join(lines) + "\n"
 
 
+def user_menu_path():
+    config = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(config) / "omarchy/extensions/omarchy-menu.jsonc"
+
+
+def is_cursor_row(line):
+    stripped = line.lstrip()
+    return stripped.startswith('"style.cursor":') or stripped.startswith('"style.cursor.')
+
+
+def merged_menu(text, fragment):
+    kept = [line for line in text.splitlines() if not is_cursor_row(line)]
+    body = "\n".join(kept).rstrip()
+    idx = body.rfind("}")
+    if idx < 0:
+        raise SystemExit("no closing brace in the Omarchy menu file")
+    head = body[:idx].rstrip()
+    if head and not head.endswith("{") and not head.endswith(","):
+        head += ","
+    return head + "\n" + fragment.strip("\n") + "\n" + body[idx:]
+
+
+def reload_menu():
+    path = user_menu_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text("{\n}\n", encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    updated = merged_menu(text, build())
+    if not updated.endswith("\n"):
+        updated += "\n"
+    if updated == text:
+        return
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate the Style > Cursor menu fragment.")
     parser.add_argument("output", nargs="?", help="Write the fragment to this path instead of stdout.")
+    parser.add_argument("--reload", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.reload:
+        reload_menu()
+        return
     text = build()
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")

@@ -12,9 +12,15 @@ cd omarchy-cursor-style-submenu
 
 ## Themes
 
-Put each theme in `~/.local/share/icons/` (or `~/.icons/`). Themes already in `/usr/share/icons/` are included too. The folder name is the theme name.
+Put each theme in `~/.local/share/icons/` (or `~/.icons/`). Themes already in `/usr/share/icons/` are included too. The folder name is the theme name. A theme is a folder that contains `cursors/`.
 
-`./install.sh` rebuilds Style → Cursor from those folders. Run it again after adding or removing a theme. Retrosmart packs stay grouped under Win-ish, Mac-ish, Cur-font, and Win 3D. Anything else is listed on the Cursor menu. The menu cannot rescan by itself.
+After adding or removing a theme, reload the menu:
+
+```bash
+cursor-menu reload
+```
+
+That rescans those folders and reloads Style → Cursor, the same way `hyprctl reload` reloads Hyprland. Retrosmart packs stay grouped under Win-ish, Mac-ish, Cur-font, and Win 3D. Anything else is listed on the Cursor menu.
 
 ## A personal favourite cursor to get started
 
@@ -25,6 +31,7 @@ Switching also writes the GTK cursor settings and `~/.icons/default`, so XWaylan
 ## Switch from a terminal
 
 ```bash
+cursor-menu reload
 omarchy-cursor-set tetoW
 omarchy-cursor-set --default
 omarchy-cursor-set --size 32

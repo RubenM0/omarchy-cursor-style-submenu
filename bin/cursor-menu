@@ -1,0 +1,14 @@
+#!/bin/bash
+# Rescan installed cursor themes and reload the running Style > Cursor menu.
+# cursor-menu reload is the whole operation, the same shape as hyprctl reload.
+
+set -euo pipefail
+
+if [[ $# -ne 1 || $1 != reload ]]; then
+  echo "Usage: cursor-menu reload" >&2
+  exit 2
+fi
+
+here=$(cd "$(dirname "$0")" && pwd)
+python3 "$here/omarchy-cursor-menu" --reload
+exec omarchy menu refresh

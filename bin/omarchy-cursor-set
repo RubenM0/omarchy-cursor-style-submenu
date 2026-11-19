@@ -1,15 +1,22 @@
 #!/bin/bash
 # Apply an Xcursor theme or size and keep it across login.
-# GTK settings and ~/.icons/default follow the same choice, so XWayland and
-# GTK apps do not stay on the previous cursor. Pointer speed is Hyprland's
+# The compositor cursor, gsettings, GTK settings, ~/.icons/default, Hyprland
+# hl.env, and the systemd activation environment are updated together.
+# A requested size is snapped to a bitmap the theme actually ships. Hyprland
+# keeps that logical size. XWayland is unscaled, so XCURSOR_SIZE is the nearest
+# shipped bitmap to logical size times the focused monitor scale.
+# Desktop apps are systemd scopes and copy the shell's environment, so the
+# shell is restarted after a change. Already-open apps keep the cursor they
+# loaded until they are restarted. Pointer speed is Hyprland's
 # input.sensitivity, from -1 to 1. omarchy-cursor-current prints the active
-# theme name. omarchy-cursor-size prints the active size. omarchy-cursor-speed
-# prints the active sensitivity.
+# theme name. omarchy-cursor-size prints the active logical size.
+# omarchy-cursor-speed prints the active sensitivity.
 
 set -euo pipefail
 
 HYPR_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprland.lua"
 HYPR_INPUT="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/input.lua"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 cursor_current() {
   local theme
@@ -24,7 +31,10 @@ cursor_size() {
   size=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null || true)
   size=${size//[^0-9]/}
   if [[ -z $size && -f $HYPR_CONFIG ]]; then
-    size=$(sed -n 's/^hl.env("XCURSOR_SIZE", "\([0-9][0-9]*\)").*/\1/p' "$HYPR_CONFIG" | head -1)
+    size=$(sed -n 's/^hl.env("HYPRCURSOR_SIZE", "\([0-9][0-9]*\)").*/\1/p' "$HYPR_CONFIG" | head -1)
+    if [[ -z $size ]]; then
+      size=$(sed -n 's/^hl.env("XCURSOR_SIZE", "\([0-9][0-9]*\)").*/\1/p' "$HYPR_CONFIG" | head -1)
+    fi
   fi
   printf '%s\n' "${size:-24}"
 }
@@ -61,6 +71,16 @@ else:
 '
 }
 
+# First Inherits= name, with surrounding whitespace removed. Spaces inside the
+# name stay: "DMZ White" is a theme, not two tokens.
+first_inherit() {
+  local inherits=$1
+  inherits=${inherits%%,*}
+  inherits=${inherits#"${inherits%%[![:space:]]*}"}
+  inherits=${inherits%"${inherits##*[![:space:]]}"}
+  printf '%s\n' "$inherits"
+}
+
 # Hyprland needs a theme directory that contains cursors/. Omarchy's "default"
 # theme only inherits Adwaita, so follow one Inherits= hop when needed.
 # ~/.icons/default is our own XWayland fallback, so never treat it as the source
@@ -69,8 +89,7 @@ hypr_theme() {
   local theme=$1 dir inherits
   if [[ $theme == default ]]; then
     inherits=$(sed -n 's/^Inherits=//p' /usr/share/icons/default/index.theme 2>/dev/null | head -1)
-    inherits=${inherits%%,*}
-    inherits=${inherits// /}
+    inherits=$(first_inherit "$inherits")
     printf '%s\n' "${inherits:-Adwaita}"
     return
   fi
@@ -83,8 +102,7 @@ hypr_theme() {
   for dir in "$HOME/.local/share/icons" "$HOME/.icons" /usr/share/icons; do
     if [[ -f $dir/$theme/index.theme ]]; then
       inherits=$(sed -n 's/^Inherits=//p' "$dir/$theme/index.theme" | head -1)
-      inherits=${inherits%%,*}
-      inherits=${inherits// /}
+      inherits=$(first_inherit "$inherits")
       if [[ -n $inherits ]]; then
         printf '%s\n' "$inherits"
         return
@@ -94,39 +112,21 @@ hypr_theme() {
   printf '%s\n' "$theme"
 }
 
-clear_cursor_overrides() {
-  python3 - "$HYPR_CONFIG" << 'PY'
-import os, re, sys
-path = sys.argv[1]
-if not os.path.exists(path):
-    raise SystemExit(0)
-text = open(path).read()
-keys = ("XCURSOR_THEME", "HYPRCURSOR_THEME", "XCURSOR_SIZE", "HYPRCURSOR_SIZE")
-for key in keys:
-    text = re.sub(rf'^hl\.env\("{key}", ".*"\)\n', "", text, flags=re.M)
-text = re.sub(r"\n{3,}", "\n\n", text)
-if open(path).read() == text:
-    raise SystemExit(0)
-open(path, "w").write(text)
-PY
-}
-
 persist_hypr() {
-  local theme=$1 size=$2 what=$3
-  python3 - "$HYPR_CONFIG" "$theme" "$size" "$what" << 'PY'
+  local theme=$1 hypr_size=$2 xcursor_size=$3
+  python3 - "$HYPR_CONFIG" "$theme" "$hypr_size" "$xcursor_size" << 'PY'
 import os, re, sys
-path, theme, size, what = sys.argv[1:]
+path, theme, hypr_size, xcursor_size = sys.argv[1:]
 lua = theme.replace("\\", "\\\\").replace('"', '\\"')
 text = open(path).read() if os.path.exists(path) else ""
 if text and not text.endswith("\n"):
     text += "\n"
-replacements = {}
-if what in ("theme", "both"):
-    replacements["XCURSOR_THEME"] = f'hl.env("XCURSOR_THEME", "{lua}")\n'
-    replacements["HYPRCURSOR_THEME"] = f'hl.env("HYPRCURSOR_THEME", "{lua}")\n'
-if what in ("size", "both"):
-    replacements["XCURSOR_SIZE"] = f'hl.env("XCURSOR_SIZE", "{size}")\n'
-    replacements["HYPRCURSOR_SIZE"] = f'hl.env("HYPRCURSOR_SIZE", "{size}")\n'
+replacements = {
+    "XCURSOR_THEME": f'hl.env("XCURSOR_THEME", "{lua}")\n',
+    "HYPRCURSOR_THEME": f'hl.env("HYPRCURSOR_THEME", "{lua}")\n',
+    "XCURSOR_SIZE": f'hl.env("XCURSOR_SIZE", "{xcursor_size}")\n',
+    "HYPRCURSOR_SIZE": f'hl.env("HYPRCURSOR_SIZE", "{hypr_size}")\n',
+}
 for key, repl in replacements.items():
     pat = re.compile(rf'^hl\.env\("{key}", ".*"\)\n', re.M)
     if pat.search(text):
@@ -217,6 +217,132 @@ if inherits:
 PY
 }
 
+# Bitmap sizes stored in the theme's left_ptr cursor. One size per line.
+theme_sizes() {
+  python3 "$SCRIPT_DIR/omarchy-cursor-menu" --sizes "$1"
+}
+
+# Closest shipped size. A tie prefers the larger bitmap so an unscaled
+# XWayland cursor is not smaller than the scaled desktop cursor.
+nearest_size() {
+  local target=$1
+  shift
+  python3 -c '
+import sys
+target = float(sys.argv[1])
+sizes = [int(size) for size in sys.argv[2:]]
+if not sizes:
+    raise SystemExit(1)
+print(min(sizes, key=lambda size: (abs(size - target), -size)))
+' "$target" "$@"
+}
+
+monitor_scale() {
+  hyprctl monitors -j 2>/dev/null | python3 -c '
+import json, sys
+try:
+    monitors = json.load(sys.stdin)
+except Exception:
+    print("1")
+    raise SystemExit(0)
+if not isinstance(monitors, list) or not monitors:
+    print("1")
+    raise SystemExit(0)
+chosen = next((monitor for monitor in monitors if monitor.get("focused")), monitors[0])
+try:
+    scale = float(chosen.get("scale") or 1)
+except (TypeError, ValueError):
+    scale = 1.0
+if scale <= 0:
+    scale = 1.0
+text = f"{scale:.4f}".rstrip("0").rstrip(".")
+print(text or "1")
+'
+}
+
+# hypr_size is the logical size Hyprland scales. xcursor_size is the bitmap
+# XWayland draws at 1:1 because force_zero_scaling is on.
+publish_cursor_env() {
+  local theme=$1 hypr_size=$2 xcursor_size=$3 lua
+  if [[ -z $theme || $theme == default ]]; then
+    echo "omarchy-cursor-set: refusing to publish a cursor theme with no cursors/" >&2
+    return 1
+  fi
+  if [[ ! $hypr_size =~ ^[1-9][0-9]*$ || ! $xcursor_size =~ ^[1-9][0-9]*$ ]]; then
+    echo "omarchy-cursor-set: refusing to publish cursor size: ${hypr_size:-<empty>}/${xcursor_size:-<empty>}" >&2
+    return 1
+  fi
+  lua=$(python3 -c '
+import sys
+theme, hypr_size, xcursor_size = sys.argv[1:]
+def q(value):
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+print(
+    f"hl.env(\"XCURSOR_THEME\", {q(theme)}); "
+    f"hl.env(\"HYPRCURSOR_THEME\", {q(theme)}); "
+    f"hl.env(\"XCURSOR_SIZE\", {q(xcursor_size)}); "
+    f"hl.env(\"HYPRCURSOR_SIZE\", {q(hypr_size)})"
+)
+' "$theme" "$hypr_size" "$xcursor_size")
+  # hyprctl setenv does not reach dispatcher environment. hl.env does.
+  hyprctl eval "$lua" >/dev/null
+  # VAR=VAL would split on "=" inside a theme name. Set the four values in this
+  # command's environment and publish those names only, not the inherited environ.
+  XCURSOR_THEME=$theme XCURSOR_SIZE=$xcursor_size HYPRCURSOR_THEME=$theme HYPRCURSOR_SIZE=$hypr_size \
+    dbus-update-activation-environment --systemd \
+      XCURSOR_THEME XCURSOR_SIZE HYPRCURSOR_THEME HYPRCURSOR_SIZE
+  xsetroot -cursor_name left_ptr >/dev/null 2>&1 || true
+}
+
+# The launcher was started at login and still has the old cursor environment.
+# Scopes copy that environment. Restart from systemd so killing the bar does
+# not cancel the restart. The new shell is spawned by Hyprland and inherits
+# the hl.env values just published.
+restart_launcher() {
+  if ! command -v omarchy >/dev/null 2>&1; then
+    return 0
+  fi
+  systemd-run --user --collect --quiet --no-block \
+    --unit="omarchy-cursor-shell-restart-$$" \
+    omarchy restart shell >/dev/null 2>&1 || true
+}
+
+# theme is the menu name (gsettings). inherits is the directory Hyprland and
+# Xcursor can load. sync_gsettings_theme writes inherits back during setcursor,
+# so the user-facing name has to be restored afterwards.
+apply_cursor() {
+  local theme=$1 inherits=$2 size=$3
+  local logical xcursor scale
+  local -a sizes=()
+  if [[ -z $inherits || $inherits == default ]]; then
+    inherits=Adwaita
+  fi
+  if [[ ! $size =~ ^[1-9][0-9]*$ ]]; then
+    echo "omarchy-cursor-set: refusing to apply cursor size: ${size:-<empty>}" >&2
+    return 1
+  fi
+  logical=$size
+  xcursor=$size
+  mapfile -t sizes < <(theme_sizes "$inherits")
+  if (( ${#sizes[@]} )); then
+    logical=$(nearest_size "$size" "${sizes[@]}")
+    scale=$(monitor_scale)
+    xcursor=$(python3 -c 'import sys; print(float(sys.argv[1]) * float(sys.argv[2]))' "$logical" "$scale")
+    xcursor=$(nearest_size "$xcursor" "${sizes[@]}")
+  fi
+  if [[ $logical != "$size" ]]; then
+    echo "Cursor size $size is not in $inherits; using $logical." >&2
+  fi
+  hyprctl setcursor "$inherits" "$logical"
+  gsettings set org.gnome.desktop.interface cursor-theme "$theme"
+  gsettings set org.gnome.desktop.interface cursor-size "$logical"
+  persist_hypr "$inherits" "$logical" "$xcursor"
+  write_desktop_cursor "$theme" "$logical" "$inherits"
+  publish_cursor_env "$inherits" "$logical" "$xcursor"
+  python3 "$SCRIPT_DIR/omarchy-cursor-menu" --reload
+  restart_launcher
+}
+
 # Keep the override in a marked block so the commented input.lua template stays
 # untouched. 0 removes the block and returns to Omarchy's sensitivity.
 persist_speed() {
@@ -293,28 +419,34 @@ else:
     echo "Sensitivity is from -1 to 1. 0 is Omarchy's default." >&2
     exit 2
   fi
+  local created=0 before errors
   backup=$(mktemp /tmp/opencode/cursor-speed.XXXXXX)
   if [[ -f $HYPR_INPUT ]]; then
     cp "$HYPR_INPUT" "$backup"
   else
+    created=1
     : > "$backup"
   fi
+  before=$(hyprctl configerrors 2>&1 || true)
   status=$(persist_speed "$normalized")
   if [[ $status == changed ]]; then
     if ! hyprctl reload >/dev/null 2>&1; then
-      cp "$backup" "$HYPR_INPUT"
-      hyprctl reload >/dev/null 2>&1 || true
-      rm -f "$backup"
-      echo "Hyprland rejected the pointer speed change." >&2
-      exit 1
+      errors="reload failed"
+    else
+      errors=$(hyprctl configerrors 2>&1 || true)
     fi
-    errors=$(hyprctl configerrors 2>&1 || true)
-    if [[ -n ${errors//[[:space:]]/} ]]; then
-      cp "$backup" "$HYPR_INPUT"
+    if [[ ${errors-} == "reload failed" || "$errors" != "$before" ]]; then
+      if [[ $created -eq 1 ]]; then
+        rm -f "$HYPR_INPUT"
+      else
+        cp "$backup" "$HYPR_INPUT"
+      fi
       hyprctl reload >/dev/null 2>&1 || true
       rm -f "$backup"
       echo "Hyprland rejected the pointer speed change." >&2
-      printf '%s\n' "$errors" >&2
+      if [[ $errors != "reload failed" && -n ${errors//[[:space:]]/} ]]; then
+        printf '%s\n' "$errors" >&2
+      fi
       exit 1
     fi
   fi
@@ -339,15 +471,7 @@ if [[ $cmd == omarchy-cursor-speed && $# -eq 0 ]]; then
 fi
 
 if [[ ${1-} == --default ]]; then
-  inherits=$(hypr_theme default)
-  if [[ -z $inherits || $inherits == default ]]; then
-    inherits=Adwaita
-  fi
-  hyprctl setcursor "$inherits" 24
-  gsettings set org.gnome.desktop.interface cursor-theme default
-  gsettings set org.gnome.desktop.interface cursor-size 24
-  clear_cursor_overrides
-  write_desktop_cursor default 24 "$inherits"
+  apply_cursor default "$(hypr_theme default)" 24
   exit 0
 fi
 
@@ -358,17 +482,11 @@ if [[ ${1-} == --size ]]; then
     exit 2
   fi
   theme=$(cursor_current)
-  inherits=
-  if [[ -n $theme ]]; then
-    inherits=$(hypr_theme "$theme")
-    if [[ $theme == default && ( -z $inherits || $inherits == default ) ]]; then
-      inherits=Adwaita
-    fi
-    hyprctl setcursor "$inherits" "$size"
+  if [[ -z $theme ]]; then
+    echo "No cursor theme is selected. Pick a theme first." >&2
+    exit 1
   fi
-  gsettings set org.gnome.desktop.interface cursor-size "$size"
-  persist_hypr "$theme" "$size" size
-  write_desktop_cursor "$theme" "$size" "$inherits"
+  apply_cursor "$theme" "$(hypr_theme "$theme")" "$size"
   exit 0
 fi
 
@@ -404,10 +522,4 @@ if [[ -z $found ]]; then
   exit 1
 fi
 
-size=$(cursor_size)
-inherits=$(hypr_theme "$theme")
-hyprctl setcursor "$inherits" "$size"
-gsettings set org.gnome.desktop.interface cursor-theme "$theme"
-gsettings set org.gnome.desktop.interface cursor-size "$size"
-persist_hypr "$theme" "$size" theme
-write_desktop_cursor "$theme" "$size" "$inherits"
+apply_cursor "$theme" "$(hypr_theme "$theme")" "$(cursor_size)"

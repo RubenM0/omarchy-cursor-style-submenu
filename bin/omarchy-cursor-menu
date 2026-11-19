@@ -11,11 +11,13 @@ import argparse
 import json
 import os
 import re
+import struct
+import subprocess
 import sys
 from pathlib import Path
 
 ICON = "\U000f01c0"
-SIZES = (8, 10, 12, 16, 20, 24, 28, 32, 64, 128)
+IMAGE_TYPE = 0xFFFD0002
 # Hyprland pointer sensitivity. 0 is unmodified. Labels are what omarchy-cursor-speed prints.
 SPEEDS = (
     ("n1", "-1"),
@@ -66,6 +68,103 @@ WIN3D_VARIANTS = {
     "hand_stopwatch-shadow": 5,
 }
 RESERVED = {"default", "size", "speed", "win-ish", "mac-ish", "cur-font", "win-3d"}
+
+
+def safe_theme_name(name):
+    if not name or name in {".", ".."} or name.startswith("."):
+        return False
+    if "/" in name or "\\" in name or ".." in name:
+        return False
+    return not any(ord(ch) < 32 for ch in name)
+
+
+def theme_dir(name):
+    if not safe_theme_name(name):
+        return None
+    for root in ROOTS:
+        path = root / name
+        if (path / "cursors").is_dir():
+            return path
+    return None
+
+
+def first_inherit(value):
+    return value.split(",", 1)[0].strip()
+
+
+def loadable_theme(name):
+    if theme_dir(name):
+        return name
+    if not name or name == "default":
+        inherit = "Adwaita"
+        index = Path("/usr/share/icons/default/index.theme")
+        if index.is_file():
+            for line in index.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("Inherits="):
+                    inherit = first_inherit(line.split("=", 1)[1]) or inherit
+                    break
+        return inherit if theme_dir(inherit) else "Adwaita"
+    for root in ROOTS:
+        index = root / name / "index.theme"
+        if not index.is_file():
+            continue
+        for line in index.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("Inherits="):
+                inherit = first_inherit(line.split("=", 1)[1])
+                if theme_dir(inherit):
+                    return inherit
+    return name
+
+
+def shipped_sizes(name):
+    directory = theme_dir(name)
+    if directory is None:
+        return []
+    cursors = directory / "cursors"
+    path = cursors / "left_ptr"
+    if not path.is_file():
+        files = sorted(
+            entry for entry in cursors.iterdir()
+            if entry.is_file() and not entry.name.startswith(".")
+        )
+        path = files[0] if files else None
+    if path is None:
+        return []
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return []
+    if len(data) < 16 or data[:4] != b"Xcur":
+        return []
+    _, _, _, ntoc = struct.unpack_from("<4sIII", data, 0)
+    offset = 16
+    found = set()
+    for _ in range(min(ntoc, 4096)):
+        if offset + 12 > len(data):
+            break
+        kind, subtype, _position = struct.unpack_from("<III", data, offset)
+        offset += 12
+        if kind == IMAGE_TYPE and 0 < subtype <= 512:
+            found.add(subtype)
+    return sorted(found)
+
+
+def current_gsettings_theme():
+    try:
+        raw = subprocess.check_output(
+            ["gsettings", "get", "org.gnome.desktop.interface", "cursor-theme"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "default"
+    if len(raw) >= 2 and raw[0] == "'" and raw[-1] == "'":
+        raw = raw[1:-1]
+    return raw or "default"
+
+
+def size_choices():
+    return shipped_sizes(loadable_theme(current_gsettings_theme())) or [24]
 
 
 def discover():
@@ -194,7 +293,7 @@ def static_rows():
         }),
         submenu("style.cursor.size", "Size", "Cursor Size"),
     ]
-    for size in SIZES:
+    for size in size_choices():
         lines.append(row(f"style.cursor.size.{size}", {
             "icon": ICON,
             "label": str(size),
@@ -322,7 +421,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate the Style > Cursor menu fragment.")
     parser.add_argument("output", nargs="?", help="Write the fragment to this path instead of stdout.")
     parser.add_argument("--reload", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--sizes", metavar="THEME", help="Print bitmap sizes shipped by THEME.")
     args = parser.parse_args()
+    if args.sizes:
+        for size in shipped_sizes(args.sizes):
+            print(size)
+        return
     if args.reload:
         reload_menu()
         return
